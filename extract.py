@@ -10,7 +10,13 @@ from dotenv import load_dotenv
 import json
 import os
 import requests
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 load_dotenv()
 
@@ -31,9 +37,9 @@ STATION_STATUS_URL = "https://velib-metropole-opendata.smovengo.cloud/opendata/V
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&hourly=temperature_2m,weather_code&timezone=Europe/Paris&forecast_days=1"
 
 
-def get_station_information():
+def fetch_data(url, api_name):
     try:
-        response = requests.get(STATION_INFO_URL, timeout=10)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         return data
@@ -43,54 +49,12 @@ def get_station_information():
 
     except requests.RequestException as e:
         raise RuntimeError(
-            f"Erreur HTTP/réseau lors de l'appel à l'API Vélib info : {e}"
+            f"Erreur HTTP/réseau lors de l'appel à l'API {api_name} : {e}"
         ) from e
 
     except ValueError as e:
         raise RuntimeError(
-            "La réponse de l'API Vélib status n'est pas un JSON valide"
-        ) from e
-
-
-def get_station_status():
-    try:
-        response = requests.get(STATION_STATUS_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return data
-
-    except requests.Timeout as e:
-        raise TimeoutError(f"Timeout error {e}") from e
-
-    except requests.RequestException as e:
-        raise RuntimeError(
-            f"Erreur HTTP/réseau lors de l'appel à l'API Vélib status : {e}"
-        ) from e
-
-    except ValueError as e:
-        raise RuntimeError(
-            "La réponse de l'API Vélib status n'est pas un JSON valide"
-        ) from e
-
-
-def get_weather_forecast():
-    try:
-        response = requests.get(WEATHER_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return data
-
-    except requests.Timeout as e:
-        raise TimeoutError(f"Timeout error {e}") from e
-
-    except requests.RequestException as e:
-        raise RuntimeError(
-            f"Erreur HTTP/réseau lors de l'appel à l'API Open-Meteo : {e}"
-        ) from e
-
-    except ValueError as e:
-        raise RuntimeError(
-            "La réponse de l'API Open-Meteo n'est pas un JSON valide"
+            f"La réponse de l'API {api_name} n'est pas un JSON valide"
         ) from e
 
 
@@ -158,7 +122,7 @@ def json_to_s3(data, s3_key, region=REGION, bucket_name=BUCKET_NAME):
     except BotoCoreError as e:
         raise RuntimeError(f"Erreur boto3 lors de l'écriture S3 : {e}") from e
     
-    print(f"{s3_key} created in AWS S3 BUCKET")
+    logging.info(f"{s3_key} created in AWS S3 BUCKET")
 
 def create_snapshot(payload):
     record_count = 0
@@ -204,7 +168,7 @@ def main():
     args = parser.parse_args()
 
     if args.type in ["status", "both", "all"]:
-        stations_status = get_station_status()
+        stations_status = fetch_data(STATION_STATUS_URL, "Vélib status")
         check_data(stations_status, "STATUS")
         snapshot_station_status = create_snapshot(stations_status)
         collected_at = snapshot_station_status["metadata"]["collected_at"]
@@ -212,7 +176,7 @@ def main():
         json_to_s3(snapshot_station_status, s3_key)
 
     if args.type in ["info", "both", "all"]:
-        stations_information = get_station_information()
+        stations_information = fetch_data(STATION_INFO_URL, "Vélib info")
         check_data(stations_information, "INFO")
         snapshot_station_information = create_snapshot(stations_information)
         collected_at = snapshot_station_information["metadata"]["collected_at"]
@@ -220,7 +184,7 @@ def main():
         json_to_s3(snapshot_station_information, s3_key)
 
     if args.type in ["weather", "all"]:
-        weather_forecast = get_weather_forecast()
+        weather_forecast = fetch_data(WEATHER_URL, "Open-Meteo")
         check_weather_data(weather_forecast)
         collected_at = datetime.now().isoformat()
         s3_key = build_s3_key("weather", collected_at)

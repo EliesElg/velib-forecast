@@ -5,6 +5,18 @@ services:
       - .env
     volumes:
       - .:/app
+  transform:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    volumes:
+      - .:/app
+    ports:
+      - "8888:8888"
+    env_file:
+      - .env
+    
+  
 
 
       

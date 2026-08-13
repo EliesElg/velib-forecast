@@ -1,0 +1,14 @@
+{
+  "name": "Velib Spark Dev Container",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "transform",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  }
+}

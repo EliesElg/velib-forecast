@@ -90,3 +90,66 @@ velib_joined.filter(
    f.col("lat").isNull()
 ).count()
 # %%
+
+weather_df = spark.read.json(weather_path)
+# %%
+weather_df.show(5)
+# %%
+weather_exploded = weather_df.withColumn(
+   "temperatures",
+   f.arrays_zip(
+      f.col("hourly.temperature_2m"),
+      f.col("hourly.time"),
+      f.col("hourly.weather_code")
+   )
+)
+# %%
+weather_exploded.select('temperatures').printSchema()
+# %%
+weather_exploded.show()
+# %%
+weather_exploded = weather_exploded.withColumn('exploded_temperatures', f.explode(f.col('temperatures')))
+
+# %%
+weather_exploded.show()
+# %%
+
+weather_final = weather_exploded.select(
+   f.col('exploded_temperatures.temperature_2m').alias('temperature'),
+   f.col('exploded_temperatures.time').alias('hour'),
+   f.col('exploded_temperatures.weather_code').alias('weather_code')
+)
+
+# %%
+weather_final.show(5)
+# %%
+weather_mapping_data = [
+    (0, "Ciel dégagé"),
+    (1, "Principalement dégagé"),
+    (2, "Partiellement nuageux"),
+    (3, "Couvert"),
+    (45, "Brouillard"),
+    (48, "Brouillard"),
+    (51, "Bruine faible"),
+    (53, "Bruine modérée"),
+    (55, "Bruine forte"),
+    (56, "Bruine verglaçante"),
+    (57, "Bruine verglaçante"),
+    (61, "Pluie faible"),
+    (63, "Pluie modérée"),
+    (65, "Pluie forte"),
+    (66, "Pluie verglaçante"),
+    (67, "Pluie verglaçante"),
+    (71, "Neige faible"),
+    (73, "Neige modérée"),
+    (75, "Neige forte"),
+    (77, "Grains de neige"),
+    (80, "Averses faibles"),
+    (81, "Averses modérées"),
+    (82, "Averses fortes"),
+    (85, "Averses de neige"),
+    (86, "Averses de neige"),
+    (95, "Orage"),
+    (96, "Orage avec grêle"),
+    (99, "Orage avec grêle"),
+]

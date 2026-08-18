@@ -153,3 +153,45 @@ weather_mapping_data = [
     (96, "Orage avec grêle"),
     (99, "Orage avec grêle"),
 ]
+
+# %%
+mapping_df = spark.createDataFrame(weather_mapping_data, ["weather_code", "weather_description"])
+
+# %%
+weather_final = weather_final.join(
+    f.broadcast(mapping_df),
+    on="weather_code",
+    how="left"
+)
+
+# %%
+weather_final.show(10)
+
+# %%
+velib_prepared = velib_joined.withColumn(
+    "hour_match",
+    f.date_trunc("hour", f.to_timestamp("collected_at"))
+)
+
+# %%
+weather_prepared = weather_final.withColumn(
+    "hour_match",
+    f.date_trunc("hour", f.to_timestamp("hour"))
+)
+
+# %%
+velib_with_weather = velib_prepared.join(
+    f.broadcast(weather_prepared),
+    on="hour_match",
+    how="left"
+)
+
+# %%
+velib_with_weather.show(10)
+
+
+
+# %%
+
+velib_with_weather.filter(f.col("temperature").isNull()).count()
+# %%

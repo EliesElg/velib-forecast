@@ -15,6 +15,44 @@ services:
       - "8888:8888"
     env_file:
       - .env
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    command: bash -c "airflow db init && airflow users create --username admin --firstname Admin --lastname Admin --role Admin --email admin@example.com --password admin && airflow webserver"
+    ports:
+      - "8080:8080"
+    volumes:
+      - airflow-metadata:/opt/airflow
+      - ./dags:/opt/airflow/dags
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    command: bash -c "airflow db init && airflow scheduler"
+    volumes:
+      - airflow-metadata:/opt/airflow
+      - ./dags:/opt/airflow/dags
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+
+volumes:
+  airflow-metadata:
+
     
   
 

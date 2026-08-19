@@ -5,12 +5,25 @@ import os
 from dotenv import load_dotenv
 import pyspark.sql.functions as f
 load_dotenv()
+from datetime import datetime
 
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 
-velib_status_path = "s3a://velib-forecast-data-elies/raw/status/year=2026/month=08/day=06/hour=21/snapshot_20260806T212007Z.json"
-weather_path = "s3a://velib-forecast-data-elies/raw/weather/year=2026/month=08/day=06/hour=21/snapshot_20260806T212008Z.json"
-velib_info_path = "s3a://velib-forecast-data-elies/raw/info/year=2026/month=08/day=06/hour=21/snapshot_20260806T212008Z.json"
+import argparse
+
+# %%
+# Configuration de argparse pour récupérer les chemins S3 en arguments de la ligne de commande
+parser = argparse.ArgumentParser(description="Script de transformation PySpark pour Vélib et Météo")
+parser.add_argument("--velib-status-path", required=True, help="Chemin S3 du fichier de status Vélib")
+parser.add_argument("--weather-path", required=True, help="Chemin S3 du fichier de météo")
+parser.add_argument("--velib-info-path", required=True, help="Chemin S3 du fichier d'informations des stations Vélib")
+args = parser.parse_args()
+
+# Assignation des variables à partir des arguments reçus (et conversion automatique en s3a:// si s3:// est utilisé)
+velib_status_path = args.velib_status_path.replace("s3://", "s3a://")
+weather_path = args.weather_path.replace("s3://", "s3a://")
+velib_info_path = args.velib_info_path.replace("s3://", "s3a://")
+
 spark = (SparkSession.builder
          .appName('Velib')
          .config(
@@ -194,4 +207,53 @@ velib_with_weather.show(10)
 # %%
 
 velib_with_weather.filter(f.col("temperature").isNull()).count()
+# %%
+
+# %%
+# EXTRACTION DU SNAPSHOT ID
+import re
+import sys
+
+# On extrait l'identifiant du snapshot depuis le nom du fichier status S3
+match = re.search(r"snapshot_(\d{8}T\d{6}Z)\.json", velib_status_path)
+if match:
+    snapshot_id = match.group(1)
+else:
+    # Fallback basé sur collected_at si le nom de fichier ne suit pas le format standard
+    collected_at = velib_with_weather.select('collected_at').first()[0]
+    dt = datetime.fromisoformat(collected_at)
+    snapshot_id = dt.strftime("%Y%m%dT%H%M%S") + "Z"
+
+# %%
+# VÉRIFICATION DE L'IDEMPOTENCE
+try:
+    existing_df = spark.read.parquet(f"s3a://{BUCKET_NAME}/processed/")
+    if existing_df.filter(f.col("snapshot_id") == snapshot_id).count() > 0:
+        print(f"Le snapshot_id {snapshot_id} a déjà été traité. Arrêt de l'exécution (STOP).")
+        spark.stop()
+        sys.exit(0)
+except Exception:
+    # Si le répertoire processed n'existe pas encore ou est vide, on continue
+    pass
+
+# %%
+# AJOUT DU SNAPSHOT_ID ET SAUVEGARDE EN MODE APPEND
+velib_with_weather = velib_with_weather.withColumn("snapshot_id", f.lit(snapshot_id))
+
+# Extraction de la date pour le chemin de partitionnement
+collected_at = velib_with_weather.select('collected_at').first()[0]
+dt = datetime.fromisoformat(collected_at)
+year = dt.strftime("%Y")
+month = dt.strftime("%m")
+day = dt.strftime("%d")
+hour = dt.strftime("%H")
+
+path_processed = f"s3a://{BUCKET_NAME}/processed/year={year}/month={month}/day={day}/hour={hour}"
+
+velib_with_weather.write \
+   .mode("append") \
+   .parquet(path_processed)
+
+
+
 # %%

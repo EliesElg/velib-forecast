@@ -1,0 +1,13 @@
+FROM apache/airflow:2.7.2-python3.10
+
+USER root
+# Installation de Java (requis pour exécuter PySpark)
+RUN apt-get update && \
+    apt-get install -y openjdk-17-jre-headless && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+USER airflow
+# Installation des dépendances de requirements.txt du projet
+COPY requirements.txt /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt

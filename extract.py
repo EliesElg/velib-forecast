@@ -124,7 +124,7 @@ def json_to_s3(data, s3_key, region=REGION, bucket_name=BUCKET_NAME):
     
     logging.info(f"{s3_key} created in AWS S3 BUCKET")
 
-def create_snapshot(payload):
+def create_snapshot(payload, collected_at=None):
     record_count = 0
 
     if "data" in payload and "stations" in payload["data"]:
@@ -135,9 +135,12 @@ def create_snapshot(payload):
             "Le nombre d'enregistrements (record_count) est de 0, ce qui est anormal."
         )
 
+    if collected_at is None:
+        collected_at = datetime.now().isoformat()
+
     return {
         "metadata": {
-            "collected_at": datetime.now().isoformat(),
+            "collected_at": collected_at,
             "record_count": record_count,
         },
         "data": payload,
@@ -154,6 +157,41 @@ def build_s3_key(data_type, collected_at):
     return f"raw/{data_type}/year={year}/month={month}/day={day}/hour={hour}/snapshot_{timestamp}Z.json"
 
 
+def run_extraction(data_type, date_str=None):
+    if date_str is None:
+        collected_at = datetime.now().isoformat()
+    else:
+        # Standardisation de la date reçue au format ISO (ex: support timezone +00:00)
+        dt = datetime.fromisoformat(date_str)
+        collected_at = dt.isoformat()
+
+    if data_type == "status":
+        stations_status = fetch_data(STATION_STATUS_URL, "Vélib status")
+        check_data(stations_status, "STATUS")
+        snapshot_station_status = create_snapshot(stations_status, collected_at)
+        s3_key = build_s3_key("status", collected_at)
+        json_to_s3(snapshot_station_status, s3_key)
+        return f"s3a://{BUCKET_NAME}/{s3_key}"
+
+    elif data_type == "info":
+        stations_information = fetch_data(STATION_INFO_URL, "Vélib info")
+        check_data(stations_information, "INFO")
+        snapshot_station_information = create_snapshot(stations_information, collected_at)
+        s3_key = build_s3_key("info", collected_at)
+        json_to_s3(snapshot_station_information, s3_key)
+        return f"s3a://{BUCKET_NAME}/{s3_key}"
+
+    elif data_type == "weather":
+        weather_forecast = fetch_data(WEATHER_URL, "Open-Meteo")
+        check_weather_data(weather_forecast)
+        s3_key = build_s3_key("weather", collected_at)
+        json_to_s3(weather_forecast, s3_key)
+        return f"s3a://{BUCKET_NAME}/{s3_key}"
+    
+    else:
+        raise ValueError(f"Type d'extraction inconnu : {data_type}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Execution de station status, info, weather ou all"
@@ -164,31 +202,31 @@ def main():
         choices=["status", "info", "weather", "both", "all"],
         help="On recupere info, status, weather, les deux velib (both) ou tous (all) ?",
     )
+    
+    parser.add_argument(
+        "--date",
+        help="Date logique de l'extraction au format ISO 8601 (ex: 2026-08-19T12:00:00)"
+    )
 
     args = parser.parse_args()
 
-    if args.type in ["status", "both", "all"]:
-        stations_status = fetch_data(STATION_STATUS_URL, "Vélib status")
-        check_data(stations_status, "STATUS")
-        snapshot_station_status = create_snapshot(stations_status)
-        collected_at = snapshot_station_status["metadata"]["collected_at"]
-        s3_key = build_s3_key("status", collected_at)
-        json_to_s3(snapshot_station_status, s3_key)
+    # Déterminer la liste des extractions à effectuer
+    types_to_extract = []
+    if args.type == "status":
+        types_to_extract = ["status"]
+    elif args.type == "info":
+        types_to_extract = ["info"]
+    elif args.type == "weather":
+        types_to_extract = ["weather"]
+    elif args.type == "both":
+        types_to_extract = ["status", "info"]
+    elif args.type == "all":
+        types_to_extract = ["status", "info", "weather"]
 
-    if args.type in ["info", "both", "all"]:
-        stations_information = fetch_data(STATION_INFO_URL, "Vélib info")
-        check_data(stations_information, "INFO")
-        snapshot_station_information = create_snapshot(stations_information)
-        collected_at = snapshot_station_information["metadata"]["collected_at"]
-        s3_key = build_s3_key("info", collected_at)
-        json_to_s3(snapshot_station_information, s3_key)
-
-    if args.type in ["weather", "all"]:
-        weather_forecast = fetch_data(WEATHER_URL, "Open-Meteo")
-        check_weather_data(weather_forecast)
-        collected_at = datetime.now().isoformat()
-        s3_key = build_s3_key("weather", collected_at)
-        json_to_s3(weather_forecast, s3_key)
+    # Exécuter les extractions et imprimer l'URI S3 finale sur stdout (pour Airflow XCom)
+    for t in types_to_extract:
+        s3_uri = run_extraction(t, args.date)
+        print(s3_uri)
 
 
 if __name__ == "__main__":
